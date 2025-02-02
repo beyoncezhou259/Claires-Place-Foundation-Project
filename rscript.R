@@ -39,7 +39,7 @@ summary(afterChange)
 patients <- patients %>% 
   mutate(policyChange = ifelse(Date<ymd("2023-06-01"),"Before","After"))
 ggplot(patients,aes(x=policyChange))+
-  geom_bar()+
+  geom_bar(fill="gold")+
   theme_minimal()+
   labs(x="Date Relative to Policy Change on 2023-06-01",y="Number of Applications")
 
@@ -50,6 +50,7 @@ ggplot(patients,aes(x=policyChange))+
 #how many applicants not granted anything
 patients$Amt_granted <- as.numeric(patients$Amt_granted)
 noGrant <- filter(patients,Amt_granted==0)
+summary(patients,Status=="Completed",)
 #31 applicants
 
 #what is the diff in proportion of applicants that didn't receive grants for before and after the policy change
@@ -57,21 +58,39 @@ patients <- patients %>%
   mutate(granted= ifelse(Amt_granted==0,"NO","YES"))
 
 ggplot(patients,aes(x=policyChange,fill=granted))+
-  geom_bar()+
-  theme_minimal()
+  geom_bar(position="dodge")+
+  theme_minimal()+
+  labs(x="Date Relative to Policy Change on 2023-06-01",y="Number of Applications",title="Applicants that Received Grants Before and After Policy Change")
 
 beforeChange$Amt_granted <- as.numeric(beforeChange$Amt_granted)
 beforeChange <- beforeChange %>% 
   mutate(granted_b= ifelse(Amt_granted==0,"NO","YES"))
 
+afterChange$Amt_granted <- as.numeric(afterChange$Amt_granted)
+afterChange <- afterChange %>% 
+  mutate(granted_a= ifelse(Amt_granted==0,"NO","YES"))
+
+before_prop <- beforeChange %>% 
+  group_by(granted_b) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion = count/sum(count))
+before_prop
+
+after_prop <- afterChange %>% 
+  group_by(granted_a) %>% 
+  summarize(count=n()) %>% 
+  mutate(proportion = count/sum(count))
+after_prop
 #########################################
 #are factors like state, new/returning, or proportion of minors impacted by policy changes
 
-#regression analysis with interaction terms
+#regression analysis of amount granted based on minor or new
 patients$Date <- as.numeric(patients$Date)
-lm_policyChange <- lm(Date~Minor*New,
+lm_minor_new <- lm(Amt_granted~Minor*New,
               patients)
-summary(lm_policyChange)
+summary(lm_minor_new)
+get_regression_table(lm_minor_new)
+#findings: neither minor or new are statistically significant in determining amount granted
 
 #proportion of status based on minor or not
 
@@ -82,11 +101,14 @@ proportions(table_sm, margin=1)
 
 #regression analysis for predicting amount granted (independent variable) based on factors like state, age, and new (dependent variables)
 
-# Fit linear regression model
-amt_granted_model <- lm(Amt_granted ~ State, data = patients,na.rm=TRUE)
+# Fit linear regression model for amount granted by state
+amt_granted_state<- lm(Amt_granted ~ State, data = patients)
 
 # Summarize the regression model
-summary(amt_granted_model)
+summary(amt_granted_state)
+
+#get regression table
+get_regression_table(amt_granted_state)
 #findings: overall model is statistically significant (p value<0.05). 
 #CT, MD. ME, MI, RI, and WY have negative coefficient correlations, so generally receive smaller grants than intercept amount (962.07)
 #new applicants have positive coefficient correlation
@@ -116,6 +138,12 @@ null_receive_grant <- patients %>%
 get_p_value(null_receive_grant,obs_receive_grant,
             direction="left")
 
+#visualize
+visualize(null_receive_grant)+
+  shade_p_value(obs_stat = obs_receive_grant,
+                direction="left")
+
+
 #p value is 0.246, fail to reject null hypothesis 
 
 #hypothesis test comparing average grant amount before and after policy change
@@ -140,7 +168,17 @@ null_diff_grant <- patients %>%
 get_p_value(null_diff_grant,obs_diff_grant,
             direction="left")
 
+#visualize
+visualize(null_diff_grant)+
+  shade_p_value(obs_stat = obs_diff_grant,
+                direction="left")
+
+
 #p value is 0.771, fail to reject null hypothesis
+
+
+##################################################################################
+###WPP#########
 
 #rename dataset
 wpp <- WPP_app_04212024
@@ -182,7 +220,8 @@ ci <- wppBefore_dist %>%
   get_confidence_interval(type="percentile")
 
 visualize(wppBefore_dist)+
-  shade_confidence_interval(endpoints=ci)
+  shade_confidence_interval(endpoints=ci)+
+  labs(title="Simulation-Based Bootstrap Distribution for Employed Applicants Before Policy Change")
 
 #BOOTSTRAP FOR AFTER POLICY CHANGE
 # find the point estimate from the original sample
@@ -206,7 +245,8 @@ ci <- wppAfter_dist %>%
   get_confidence_interval(type="percentile")
 
 visualize(wppAfter_dist)+
-  shade_confidence_interval(endpoints=ci)
+  shade_confidence_interval(endpoints=ci)+
+  labs(title="Simulation-Based Bootstrap Distribution for Employed Applicants After Policy Change")
 #very bell shaped curve /normal distribution 
 
 #BOOTSTRAP FOR DIFF IN PROPS
@@ -254,6 +294,9 @@ ggplot(wpp,aes(x=Age,fill=Gender))+
   labs(x="Age Groups of WPP Applicants",y="Number of Applications")+
   facet_wrap(~policyChange)
   theme_minimal()
+  
+table_ag <- table(wpp$Age,wpp$Gender, wpp$policyChange)
+  proportions(table_ag,margin=1)
 
 #findings: non binary applicant was before policy change. no applicants of 46-55 age group after policy change
 
@@ -269,39 +312,68 @@ wppAfter<- wppAfter %>%
          month=month(Date), 
          day=day(Date))
 
+
 #applications by month before and after policy change 
 
+#add app_month to group all same months over years together before policy change
 applications_by_month_before <- wppBefore %>%
   mutate(month = floor_date(Date, "month")) %>%
   group_by(month) %>%
   summarise(count = n())
 
-ggplot(applications_by_month_before, aes(x = month, y = count)) +
-  geom_col(fill="lightblue") +
+wppBefore <- wppBefore %>% 
+  mutate(app_month=ifelse(month==1,"January",
+                          ifelse(month==2,"February",
+                          ifelse(month==3,"March",
+                          ifelse(month==4,"April",
+                          ifelse(month==5,"May",
+                          ifelse(month==6,"June",
+                          ifelse(month==7,"July",
+                          ifelse(month==8,"August",
+                          ifelse(month==9,"September",
+                          ifelse(month==10,"October",
+                          ifelse(month==11,"November","December"))))))))))))
+
+#visualize
+ggplot(wppBefore, aes(x = app_month)) +
+  geom_bar(fill="lightblue") +
   labs(
-    title = "Number of Applications per Month",
+    title = "Number of Applications per Month Before Policy Change",
     x = "Month",
     y = "Number of Applications"
   ) +
-  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
   theme_minimal() +
-  theme(axis.text.x = element_text(size=4, angle = 90, vjust = 0.5, hjust = 0.5))
+  theme(axis.text.x = element_text(size=10, angle = 45, vjust = 0.5, hjust = 0.5))
 
 #findings: aug 2020 and nov 2020 are notable months for application #. data is skewed right - significantly less apps in 2023
 
+#add app_month to group all same months over years together after policy change
 applications_by_month_after <- wppAfter %>%
   mutate(month = floor_date(Date, "month")) %>%
   group_by(month) %>%
   summarise(count = n())
 
-ggplot(applications_by_month_after, aes(x = month, y = count)) +
-  geom_col(fill="pink") +
+wppAfter <- wppAfter %>% 
+  mutate(app_month=ifelse(month==1,"January",
+                          ifelse(month==2,"February",
+                                 ifelse(month==3,"March",
+                                        ifelse(month==4,"April",
+                                               ifelse(month==5,"May",
+                                                      ifelse(month==6,"June",
+                                                             ifelse(month==7,"July",
+                                                                    ifelse(month==8,"August",
+                                                                           ifelse(month==9,"September",
+                                                                                  ifelse(month==10,"October",
+                                                                                         ifelse(month==11,"November","December"))))))))))))
+
+#visualize
+ggplot(wppAfter, aes(x = app_month)) +
+  geom_bar(fill="pink") +
   labs(
-    title = "Number of Applications per Month",
+    title = "Number of Applications per Month After Policy Change",
     x = "Month",
     y = "Number of Applications"
   ) +
-  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
   theme_minimal() +
   theme(axis.text.x = element_text(size=10, angle = 45, vjust = 0.5, hjust = 0.5))
 #november 2023 notable month for app 
@@ -483,4 +555,3 @@ clean_Ini_ext <- clean_Ini_ext %>%
 difference <- t.test(clean_Ini_ext$Ini_total,clean_Ini_ext$Exit_total)
 view(difference)
 #p value is 0.937, difference is not statistically significant 
-
